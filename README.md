@@ -55,6 +55,12 @@ In our research, we have incorporated individual weighted models as an integral 
 
 # Important Note on Weight Calculation (w_new)
 The code calculates a custom weight (w_new) to assess model performance. This weight considers R2 scores, error metrics, and the difference between training and validation R2 scores. A higher w_new indicates better model performance. It is important to consider this weight when selecting the best-performing model.
+# Citation
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11134635/
+
+Consensus holistic virtual screening for drug discovery: a novel machine learning model approach
+
+Moshawih, S., Bu, Z. H., Goh, H. P., Kifli, N., Lee, L. H., Goh, K. W., & Ming, L. C. (2024). Consensus holistic virtual screening for drug discovery: a novel machine learning model approach. Journal of Cheminformatics, 16.
 
 Feel free to adapt and extend this code for your specific regression tasks and datasets.
 
