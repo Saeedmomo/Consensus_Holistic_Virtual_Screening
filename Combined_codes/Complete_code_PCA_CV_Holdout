@@ -1,0 +1,141 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.decomposition import PCA
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.linear_model import LinearRegression, ElasticNet
+from sklearn.svm import SVR, NuSVR
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, AdaBoostRegressor
+from xgboost import XGBRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+# Load dataset
+dataset_path = 'Add csv file path'
+data = pd.read_csv(dataset_path)
+
+# Split dataset into features and target variable
+X = data.drop(columns=['Target_title'])
+y = data['Target_title']
+
+# === Three-way split ===
+# Step 1: Split data (10% for unseen holdout)
+X_temp, X_unseen, y_temp, y_unseen = train_test_split(X, y, test_size=0.1, random_state=1)
+
+# Step 2: Split remaining 90% into 70% training and 20% testing
+X_train, X_test, y_train, y_test = train_test_split(X_temp, y_temp, test_size=0.2222, random_state=1)
+
+# Define PCA component settings
+pca_components_list = [10, 12, 15, 17, 19, 20]
+
+# Initialize tracking variables
+best_weight = 0
+best_mean_test_score = float('-inf')
+
+for pca_components in pca_components_list:
+    print(f"\n===== PCA Components: {pca_components} =====")
+
+    # Apply PCA
+    pca = PCA(n_components=pca_components)
+    X_train_pca = pca.fit_transform(X_train)
+    X_test_pca = pca.transform(X_test)
+    X_unseen_pca = pca.transform(X_unseen)
+
+    for model_name, model_class, param_grid in [
+        ('KNN', KNeighborsRegressor(), {
+            'model__n_neighbors': [5, 10, 15, 20],
+            'model__weights': ['uniform', 'distance']
+        }), 
+        ('Elastic Net', ElasticNet(), {
+            'model__alpha': [0.0001, 0.001, 0.01, 0.1, 0.5, 1],
+            'model__l1_ratio': [0.1, 0.5, 0.9]
+        }),
+        ('Linear Regression', LinearRegression(), {}),
+        ('SVR Linear', SVR(kernel='linear'), {
+            'model__C': [0.1, 1, 10, 100]
+        }),
+        ('SVR RBF', SVR(kernel='rbf'), {
+            'model__C': [0.1, 1, 10, 100],
+            'model__gamma': [0.1, 1, 10]
+        }),
+        ('SVR Sigmoid', SVR(kernel='sigmoid'), {
+            'model__C': [0.1, 1, 10],
+            'model__gamma': [0.1, 1, 10],
+            'model__coef0': [-1, 0, 1]
+        }),
+        ('Nu-SVR', NuSVR(), {
+            'model__C': [0.1, 1, 10, 100],
+            'model__nu': [0.1, 0.3, 0.5, 0.7, 0.9],
+            'model__kernel': ['linear', 'rbf', 'sigmoid']
+        }),
+        ('Decision Tree', DecisionTreeRegressor(random_state=1), {
+            'model__max_depth': [None, 10, 20, 30],
+            'model__min_samples_split': [2, 5, 10],
+            'model__min_samples_leaf': [1, 2, 4]
+        }),
+        ('Gradient Boosting', GradientBoostingRegressor(random_state=1), {
+            'model__n_estimators': [50, 100, 200],
+            'model__learning_rate': [0.01, 0.05, 0.1],
+            'model__max_depth': [3, 5, 7]
+        }),
+        ('XGBoost', XGBRegressor(random_state=1), {
+            'model__n_estimators': [50, 100, 200],
+            'model__learning_rate': [0.01, 0.05, 0.1],
+            'model__max_depth': [3, 5, 7]
+        }),
+    ]:
+        print(f"\nPCA Components: {pca_components} | Model: {model_name}")
+
+        # Create a pipeline
+        model_pipeline = Pipeline([
+            ('scaler', StandardScaler()),
+            ('model', model_class)
+        ])
+
+        # Perform GridSearchCV
+        model_grid_search = GridSearchCV(model_pipeline, param_grid, scoring='r2', cv=5)
+        model_grid_search.fit(X_train_pca, y_train)
+
+        best_model = model_grid_search.best_estimator_
+        best_model_params = model_grid_search.best_params_
+
+        # Compute R² scores
+        r2_training = r2_score(y_train, best_model.predict(X_train_pca))
+        r2_cv = model_grid_search.best_score_  # CV=5 best R²
+        r2_testing = r2_score(y_test, best_model.predict(X_test_pca))
+        r2_unseen = r2_score(y_unseen, best_model.predict(X_unseen_pca))
+
+        # Compute error metrics
+        mse = mean_squared_error(y_test, best_model.predict(X_test_pca))
+        rmse = np.sqrt(mse)
+        mae = mean_absolute_error(y_test, best_model.predict(X_test_pca))
+
+        # Compute w_new 
+        w_new = ((r2_training + r2_cv + r2_testing) / (mse + rmse + mae)) * (
+            1 - abs(r2_training - r2_cv)) / (1 + abs(r2_training - r2_cv)) / (
+            1 + ((r2_training + r2_cv + r2_testing) / (mse + rmse + mae)) * (
+            1 - abs(r2_training - r2_cv)) / (1 + abs(r2_training - r2_cv)))
+
+        if r2_training >= 0 and r2_cv >= 0 and model_grid_search.best_score_ > best_mean_test_score:
+            best_mean_test_score = model_grid_search.best_score_
+            best_weight = w_new
+
+        # Print Model Summary
+        print(f"🔹 Best Model: {best_model}")
+        print(f"🔹 Best Model Parameters: {best_model_params}")
+        print(f"🔹 R² Training Score: {r2_training:.4f}")
+        print(f"🔹 R² Cross-Validation (CV=5) Score: {r2_cv:.4f}")
+        print(f"🔹 R² Testing Score (20% test set): {r2_testing:.4f}")
+        print(f"🔹 R² Unseen Holdout Score (10% unseen set): {r2_unseen:.4f}")
+        print(f"🔹 Mean Squared Error (MSE): {mse:.4f}")
+        print(f"🔹 Root Mean Squared Error (RMSE): {rmse:.4f}")
+        print(f"🔹 Mean Absolute Error (MAE): {mae:.4f}")
+        print(f"🔹 Weight (W_new): {w_new:.6f}")
+        print("=" * 50)
+
+# Print the best weight and best validation score
+print("\n===== Best Results Across PCA Configurations =====")
+print(f"⭐ Best Weight: {best_weight:.6f}")
+print(f"⭐ Best Mean Test Score: {best_mean_test_score:.4f}")
