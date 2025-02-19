@@ -1,0 +1,106 @@
+import pandas as pd
+import numpy as np
+from sklearn.svm import SVR
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+# Set random seed for reproducibility
+np.random.seed(1)
+
+# Load the dataset
+dataset_path = 'Add csv file path'  # Update this path
+data = pd.read_csv(dataset_path)
+
+# Split the dataset into features and the target variable
+X = data.drop(columns=['Target_title'])
+y = data['Target_title']
+
+# === Three-way split ===
+# Step 1: Split data (10% for unseen holdout)
+X_temp, X_unseen, y_temp, y_unseen = train_test_split(X, y, test_size=0.1, random_state=1)
+
+# Step 2: Split remaining 90% into 70% training and 20% testing
+X_train, X_test, y_train, y_test = train_test_split(X_temp, y_temp, test_size=0.2222, random_state=1)
+
+# Define PCA component settings
+num_components_list = [15, 17, 19, 20, 21, 22]
+
+# Define model parameters
+model_name = 'SVR Linear'
+best_w_new = 0.0
+best_model_params = None
+
+# Iterate over different PCA components
+for num_components in num_components_list:
+    print("\n-------------------")
+    print(f"🔹 Number of PCA components: {num_components}")
+    print(f"🔹 Model: {model_name}")
+
+    highest_w_new = 0.0  # Track the best w_new per PCA setting
+
+    # Create a pipeline
+    model_pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('pca', PCA(n_components=num_components)),
+        ('model', SVR(kernel='linear'))
+    ])
+
+    # Define hyperparameters for GridSearchCV
+    model_param_grid = {
+        'model__C': [0.1, 1, 2, 10],  # Regularization parameter
+        'model__epsilon': [0.1, 0.2, 0.3]  # Epsilon parameter
+    }
+
+    # Perform GridSearchCV with 5-fold cross-validation
+    model_grid_search = GridSearchCV(model_pipeline, model_param_grid,
+                                     scoring='r2', cv=5, n_jobs=-1)
+    model_grid_search.fit(X_train, y_train)
+
+    # Retrieve the best model from GridSearchCV
+    best_model = model_grid_search.best_estimator_
+    best_params = model_grid_search.best_params_
+
+    # Compute R² scores
+    r2_train = r2_score(y_train, best_model.predict(X_train))
+    r2_cv = model_grid_search.best_score_  # Best cross-validation R²
+    r2_test = r2_score(y_test, best_model.predict(X_test))
+    r2_unseen = r2_score(y_unseen, best_model.predict(X_unseen))
+
+    # Compute error metrics
+    mse = mean_squared_error(y_test, best_model.predict(X_test))
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_test, best_model.predict(X_test))
+
+    # Compute w_new 
+    w_new = ((r2_train + r2_cv + r2_test) / (mse + rmse + mae)) * (
+        1 - abs(r2_train - r2_cv)) / (1 + abs(r2_train - r2_cv)) / (
+        1 + ((r2_train + r2_cv + r2_test) / (mse + rmse + mae)) * (
+        1 - abs(r2_train - r2_cv)) / (1 + abs(r2_train - r2_cv)))
+
+    # Update the best w_new and parameters
+    if w_new > highest_w_new:
+        highest_w_new = w_new
+
+    if w_new > best_w_new:
+        best_w_new = w_new
+        best_model_params = best_params
+
+    # Print Model Performance
+    print(f"🔹 Best Model Parameters: {best_params}")
+    print(f"🔹 R² Training Score: {r2_train:.4f}")
+    print(f"🔹 R² Cross-Validation (CV=5) Score: {r2_cv:.4f}")
+    print(f"🔹 R² Testing Score (20% test set): {r2_test:.4f}")
+    print(f"🔹 R² Unseen Holdout Score (10% unseen set): {r2_unseen:.4f}")
+    print(f"🔹 Mean Squared Error (MSE): {mse:.4f}")
+    print(f"🔹 Root Mean Squared Error (RMSE): {rmse:.4f}")
+    print(f"🔹 Mean Absolute Error (MAE): {mae:.4f}")
+    print(f"🔹 Weight (W_new): {w_new:.6f}")
+    print("===================")
+
+# Print the best results across all PCA configurations
+print("\n===== Best Model Found =====")
+print(f"⭐ Best Weight (W_new): {best_w_new:.6f}")
+print(f"⭐ Best Hyperparameters: {best_model_params}")
